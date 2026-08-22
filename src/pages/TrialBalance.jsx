@@ -61,7 +61,7 @@ export default function TrialBalance() {
                 head && <tr className="group-row" key={'g' + r.ledger_id}>
                   <td colSpan={5}>{r.primary_group} › {r.group_name}</td></tr>,
                 <tr key={r.ledger_id}>
-                  <td><Link to="/statement">{r.ledger_name}</Link></td>
+                  <td><Link to={`/statement?ledger=${r.ledger_id}`}>{r.ledger_name}</Link></td>
                   <td className="num">{o.amount ? `${money(o.amount)} ${o.side}` : '—'}</td>
                   <td className="num">{Number(r.debit) ? money(r.debit) : ''}</td>
                   <td className="num">{Number(r.credit) ? money(r.credit) : ''}</td>

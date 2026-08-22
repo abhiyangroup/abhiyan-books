@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, money, today, fyStart } from '../lib/api'
+import { downloadCsv, num, COMPANY } from '../lib/csv'
 
 function Section({ title, rows }) {
   if (!rows.length) return null
@@ -34,6 +35,28 @@ export default function ProfitLoss() {
   const gross = sum('trading_income') - sum('trading_expense')
   const net = gross + sum('income') - sum('expense')
 
+  const LABEL = {
+    trading_income:  'Sales & direct income',
+    trading_expense: 'Purchases & direct expenses',
+    income:          'Indirect income',
+    expense:         'Indirect expenses',
+  }
+
+  function exportCsv() {
+    const body = []
+    for (const key of ['trading_income', 'trading_expense']) {
+      for (const r of pick(key)) body.push([LABEL[key], r.group_name, r.ledger_name, num(r.amount)])
+    }
+    body.push(['', '', 'GROSS PROFIT', num(gross)])
+    for (const key of ['income', 'expense']) {
+      for (const r of pick(key)) body.push([LABEL[key], r.group_name, r.ledger_name, num(r.amount)])
+    }
+    body.push(['', '', net >= 0 ? 'NET PROFIT' : 'NET LOSS', num(Math.abs(net))])
+
+    downloadCsv('profit-and-loss', ['Section', 'Group', 'Ledger', 'Amount'], body,
+      [COMPANY, 'Profit & Loss Account', `Period: ${from} to ${to}`])
+  }
+
   return (
     <>
       <h1>Profit &amp; Loss Account</h1>
@@ -46,6 +69,7 @@ export default function ProfitLoss() {
         <div className="field"><label>To</label>
           <input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></div>
         <button className="primary" onClick={load}>Show</button>
+        <button className="ghost" onClick={exportCsv}>Export CSV</button>
         <button className="ghost" onClick={() => window.print()}>Print</button>
       </div>
 

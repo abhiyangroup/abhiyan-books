@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, money, today, fyStart } from '../lib/api'
+import { downloadCsv, num, COMPANY } from '../lib/csv'
 
 export default function DayBook() {
   const [from, setFrom] = useState(fyStart())
@@ -23,6 +24,20 @@ export default function DayBook() {
 
   const total = filtered.reduce((s, r) => s + Number(r.amount || 0), 0)
 
+  function exportCsv() {
+    downloadCsv(
+      'day-book',
+      ['Date', 'BS Date', 'Voucher No', 'Type', 'Debit Ledgers',
+       'Credit Ledgers', 'Reference', 'Narration', 'Amount', 'Cancelled'],
+      filtered.map((r) => [
+        r.date, r.nepali_date, r.voucher_no, r.voucher_type,
+        r.debit_ledgers, r.credit_ledgers, r.reference, r.narration,
+        num(r.amount), r.is_cancelled ? 'yes' : '',
+      ]),
+      [COMPANY, 'Day Book', `Period: ${from} to ${to}`]
+    )
+  }
+
   return (
     <>
       <h1>Day Book</h1>
@@ -39,6 +54,7 @@ export default function DayBook() {
           <label>Search</label>
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ledger, number, narration" />
         </div>
+        <button className="ghost" onClick={exportCsv}>Export CSV</button>
         <Link to="/voucher"><button className="ghost">+ New voucher</button></Link>
       </div>
 

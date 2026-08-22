@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { api, money, drcr, today, fyStart } from '../lib/api'
+import { api, money, today, fyStart } from '../lib/api'
 
 export default function Dashboard() {
   const [tb, setTb] = useState([])

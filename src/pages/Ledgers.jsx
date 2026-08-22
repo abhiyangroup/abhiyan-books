@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, money } from '../lib/api'
+import { downloadCsv, num, COMPANY } from '../lib/csv'
 
 const empty = {
   name: '', group_id: '', opening_balance: 0, opening_type: 'Dr',
@@ -38,6 +39,20 @@ export default function Ledgers() {
   const withOpening = rows.filter((r) => Number(r.opening_balance)).length
   const openDr = rows.reduce((s, r) => s + (r.opening_type === 'Dr' ? Number(r.opening_balance) : 0), 0)
   const openCr = rows.reduce((s, r) => s + (r.opening_type === 'Cr' ? Number(r.opening_balance) : 0), 0)
+
+  function exportCsv() {
+    downloadCsv(
+      'ledgers',
+      ['Ledger', 'Alias', 'Under Group', 'Primary Group',
+       'Opening Balance', 'Dr/Cr', 'PAN/VAT', 'Phone', 'Address'],
+      shown.map((r) => [
+        r.name, r.alias, r.group_name, r.primary_group,
+        num(r.opening_balance), Number(r.opening_balance) ? r.opening_type : '',
+        r.pan_vat, r.phone, r.address,
+      ]),
+      [COMPANY, 'Chart of Accounts', `${shown.length} ledgers`]
+    )
+  }
 
   function startNew() { setEditing('new'); setForm(empty); setOk(''); setErr('') }
 
@@ -102,6 +117,7 @@ export default function Ledgers() {
           <input type="checkbox" checked={onlyUnset} onChange={(e) => setOnlyUnset(e.target.checked)} />
           {' '}only accounts still at zero
         </label>
+        <button className="ghost" onClick={exportCsv}>Export CSV</button>
         <button className="primary" onClick={startNew}>+ New ledger</button>
       </div>
 

@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, money } from '../lib/api'
 
-const empty = { name: '', group_id: '', opening_balance: 0, opening_type: 'Dr',
-                alias: '', pan_vat: '', phone: '', address: '' }
+const empty = {
+  name: '', group_id: '', opening_balance: 0, opening_type: 'Dr',
+  alias: '', pan_vat: '', phone: '', address: '',
+}
 
 export default function Ledgers() {
   const [rows, setRows] = useState([])
   const [groups, setGroups] = useState([])
   const [q, setQ] = useState('')
+  const [onlyUnset, setOnlyUnset] = useState(false)
   const [editing, setEditing] = useState(null)   // null | 'new' | ledger object
   const [form, setForm] = useState(empty)
   const [err, setErr] = useState('')
@@ -21,19 +24,34 @@ export default function Ledgers() {
   useEffect(load, [])
 
   const shown = useMemo(() => {
-    const s = q.toLowerCase()
-    return rows.filter((r) => !s ||
-      r.name.toLowerCase().includes(s) || (r.group_name || '').toLowerCase().includes(s))
-  }, [rows, q])
+    const s = q.trim().toLowerCase()
+    return rows.filter((r) => {
+      if (onlyUnset && Number(r.opening_balance)) return false
+      if (!s) return true
+      return r.name.toLowerCase().includes(s) ||
+             (r.group_name || '').toLowerCase().includes(s) ||
+             (r.primary_group || '').toLowerCase().includes(s)
+    })
+  }, [rows, q, onlyUnset])
+
+  // how far through the opening-balance entry you are
+  const withOpening = rows.filter((r) => Number(r.opening_balance)).length
+  const openDr = rows.reduce((s, r) => s + (r.opening_type === 'Dr' ? Number(r.opening_balance) : 0), 0)
+  const openCr = rows.reduce((s, r) => s + (r.opening_type === 'Cr' ? Number(r.opening_balance) : 0), 0)
 
   function startNew() { setEditing('new'); setForm(empty); setOk(''); setErr('') }
 
   function startEdit(r) {
     setEditing(r)
     setForm({
-      name: r.name, group_id: r.group_id,
-      opening_balance: r.opening_balance, opening_type: r.opening_type,
-      alias: r.alias || '', pan_vat: '', phone: '', address: '',
+      name: r.name,
+      group_id: r.group_id,
+      opening_balance: r.opening_balance,
+      opening_type: r.opening_type,
+      alias: r.alias || '',
+      pan_vat: r.pan_vat || '',
+      phone: r.phone || '',
+      address: r.address || '',
     })
     setOk(''); setErr('')
   }
@@ -46,12 +64,15 @@ export default function Ledgers() {
       group_id: form.group_id,
       opening_balance: parseFloat(form.opening_balance) || 0,
       opening_type: form.opening_type,
-      alias: form.alias || null,
+      alias: form.alias.trim() || null,
+      pan_vat: form.pan_vat.trim() || null,
+      phone: form.phone.trim() || null,
+      address: form.address.trim() || null,
     }
     try {
       if (editing === 'new') await api.createLedger(payload)
       else await api.updateLedger(editing.id, payload)
-      setOk('Saved.'); setEditing(null); load()
+      setOk(`Saved ${payload.name}.`); setEditing(null); load()
     } catch (e2) { setErr(e2.message) }
   }
 
@@ -63,7 +84,12 @@ export default function Ledgers() {
   return (
     <>
       <h1>Ledgers</h1>
-      <p className="sub">{rows.length} accounts imported from Tally. Opening balances start at 0 — edit them here.</p>
+      <p className="sub">
+        {rows.length} accounts imported from Tally · {withOpening} have an opening balance ·
+        opening totals {money(openDr)} Dr / {money(openCr)} Cr
+        {Math.abs(openDr - openCr) > 0.005 &&
+          <span className="cr"> · out by {money(Math.abs(openDr - openCr))}</span>}
+      </p>
       {err && <div className="err">{err}</div>}
       {ok && <div className="ok">{ok}</div>}
 
@@ -72,6 +98,10 @@ export default function Ledgers() {
           <label>Search</label>
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ledger or group name" />
         </div>
+        <label className="small" style={{ alignSelf: 'center' }}>
+          <input type="checkbox" checked={onlyUnset} onChange={(e) => setOnlyUnset(e.target.checked)} />
+          {' '}only accounts still at zero
+        </label>
         <button className="primary" onClick={startNew}>+ New ledger</button>
       </div>
 
@@ -101,10 +131,16 @@ export default function Ledgers() {
                 <option>Dr</option><option>Cr</option>
               </select>
             </div>
-            <div className="field">
-              <label>Alias</label>
-              <input value={form.alias} onChange={(e) => setForm({ ...form, alias: e.target.value })} style={{ width: 130 }} />
-            </div>
+          </div>
+          <div className="toolbar" style={{ marginBottom: 0 }}>
+            <div className="field"><label>Alias</label>
+              <input value={form.alias} onChange={(e) => setForm({ ...form, alias: e.target.value })} style={{ width: 130 }} /></div>
+            <div className="field"><label>PAN / VAT</label>
+              <input value={form.pan_vat} onChange={(e) => setForm({ ...form, pan_vat: e.target.value })} style={{ width: 130 }} /></div>
+            <div className="field"><label>Phone</label>
+              <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} style={{ width: 130 }} /></div>
+            <div className="field" style={{ flex: 1, minWidth: 180 }}><label>Address</label>
+              <input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></div>
             <button className="primary">Save</button>
             <button type="button" className="ghost" onClick={() => setEditing(null)}>Cancel</button>
           </div>
@@ -126,7 +162,9 @@ export default function Ledgers() {
                 <td className="small">{r.group_name}</td>
                 <td className="small muted">{r.primary_group}</td>
                 <td className="num">
-                  {Number(r.opening_balance) ? `${money(r.opening_balance)} ${r.opening_type}` : '—'}
+                  {Number(r.opening_balance)
+                    ? <>{money(r.opening_balance)} <span className={r.opening_type === 'Dr' ? 'dr' : 'cr'}>{r.opening_type}</span></>
+                    : '—'}
                 </td>
                 <td>
                   <button className="link" onClick={() => startEdit(r)}>edit</button>{' · '}

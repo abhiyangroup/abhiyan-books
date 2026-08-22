@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, money, drcr, today, fyStart } from '../lib/api'
+import { downloadCsv, num, COMPANY } from '../lib/csv'
 
 export default function TrialBalance() {
   const [from, setFrom] = useState(fyStart())
@@ -22,6 +23,22 @@ export default function TrialBalance() {
     return a
   }, { debit: 0, credit: 0, closeDr: 0, closeCr: 0 })
 
+  function exportCsv() {
+    downloadCsv(
+      'trial-balance',
+      ['Primary Group', 'Group', 'Ledger', 'Opening', 'Opening Dr/Cr',
+       'Debit', 'Credit', 'Closing', 'Closing Dr/Cr'],
+      shown.map((r) => {
+        const o = drcr(r.opening), c = drcr(r.closing)
+        return [r.primary_group, r.group_name, r.ledger_name,
+                num(o.amount), o.amount ? o.side : '',
+                num(r.debit), num(r.credit),
+                num(c.amount), c.amount ? c.side : '']
+      }),
+      [COMPANY, 'Trial Balance', `Period: ${from} to ${to}`]
+    )
+  }
+
   let lastGroup = null
 
   return (
@@ -39,6 +56,7 @@ export default function TrialBalance() {
         <label className="small" style={{ alignSelf: 'center' }}>
           <input type="checkbox" checked={hideZero} onChange={(e) => setHideZero(e.target.checked)} /> hide nil accounts
         </label>
+        <button className="ghost" onClick={exportCsv}>Export CSV</button>
         <button className="ghost" onClick={() => window.print()}>Print</button>
       </div>
 

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, money, today } from '../lib/api'
+import { downloadCsv, num, COMPANY } from '../lib/csv'
 
 function Side({ title, rows }) {
   const total = rows.reduce((s, r) => s + Number(r.amount), 0)
@@ -40,6 +41,19 @@ export default function BalanceSheet() {
   const diff = assets.reduce((s, r) => s + Number(r.amount), 0) -
                liabs.reduce((s, r) => s + Number(r.amount), 0)
 
+  function exportCsv() {
+    const body = []
+    for (const r of liabs) body.push(['Liabilities & Capital', r.group_name, r.ledger_name, num(r.amount)])
+    body.push(['', '', 'TOTAL LIABILITIES & CAPITAL',
+               num(liabs.reduce((s, r) => s + Number(r.amount), 0))])
+    for (const r of assets) body.push(['Assets', r.group_name, r.ledger_name, num(r.amount)])
+    body.push(['', '', 'TOTAL ASSETS',
+               num(assets.reduce((s, r) => s + Number(r.amount), 0))])
+
+    downloadCsv('balance-sheet', ['Side', 'Group', 'Ledger', 'Amount'], body,
+      [COMPANY, 'Balance Sheet', `As on: ${asOn}`])
+  }
+
   return (
     <>
       <h1>Balance Sheet</h1>
@@ -50,6 +64,7 @@ export default function BalanceSheet() {
         <div className="field"><label>As on</label>
           <input type="date" value={asOn} onChange={(e) => setAsOn(e.target.value)} /></div>
         <button className="primary" onClick={load}>Show</button>
+        <button className="ghost" onClick={exportCsv}>Export CSV</button>
         <button className="ghost" onClick={() => window.print()}>Print</button>
       </div>
 

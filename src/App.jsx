@@ -12,7 +12,6 @@ import LedgerStatement from './pages/LedgerStatement'
 import TrialBalance from './pages/TrialBalance'
 import ProfitLoss from './pages/ProfitLoss'
 import BalanceSheet from './pages/BalanceSheet'
-import Users from './pages/Users'
 
 const NAV = [
   ['/', 'Dashboard'],
@@ -24,11 +23,6 @@ const NAV = [
   ['/balance-sheet', 'Balance Sheet'],
   ['/ledgers', 'Ledgers'],
   ['/groups', 'Groups'],
-]
-
-// admin-only entries
-const ADMIN_NAV = [
-  ['/users', 'Users'],
 ]
 
 export default function App() {
@@ -69,7 +63,7 @@ export default function App() {
 
         <div className="body">
           <nav className={menuOpen ? 'sidebar open' : 'sidebar'}>
-            {[...NAV, ...(profile?.role === 'admin' ? ADMIN_NAV : [])].map(([to, label]) => (
+            {NAV.map(([to, label]) => (
               <NavLink
                 key={to}
                 to={to}
@@ -94,7 +88,6 @@ export default function App() {
               <Route path="/balance-sheet" element={<BalanceSheet />} />
               <Route path="/ledgers" element={<Ledgers />} />
               <Route path="/groups" element={<Groups />} />
-              <Route path="/users" element={<Users />} />
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>
           </main>

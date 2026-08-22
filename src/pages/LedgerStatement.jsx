@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { api, money, drcr, today, fyStart } from '../lib/api'
 
 export default function LedgerStatement() {
+  const [params] = useSearchParams()
   const [ledgers, setLedgers] = useState([])
-  const [ledgerId, setLedgerId] = useState('')
+  const [ledgerId, setLedgerId] = useState(params.get('ledger') || '')
   const [from, setFrom] = useState(fyStart())
   const [to, setTo] = useState(today())
   const [rows, setRows] = useState([])

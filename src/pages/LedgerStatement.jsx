@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { api, money, drcr, today, fyStart } from '../lib/api'
+import { downloadCsv, num, COMPANY } from '../lib/csv'
 
 export default function LedgerStatement() {
   const [params] = useSearchParams()
@@ -25,6 +26,21 @@ export default function LedgerStatement() {
   const closing = rows.length ? drcr(rows[rows.length - 1].running) : null
   const name = ledgers.find((l) => l.id === ledgerId)?.name
 
+  function exportCsv() {
+    downloadCsv(
+      `ledger-${(name || 'statement').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`,
+      ['Date', 'BS Date', 'Voucher No', 'Type', 'Particulars', 'Narration',
+       'Debit', 'Credit', 'Balance', 'Dr/Cr'],
+      rows.map((r) => {
+        const b = drcr(r.running)
+        return [r.vdate, r.nepali_date, r.voucher_no, r.voucher_type,
+                r.particulars, r.narration, num(r.debit), num(r.credit),
+                num(b.amount), b.side]
+      }),
+      [COMPANY, `Ledger Statement: ${name || ''}`, `Period: ${from} to ${to}`]
+    )
+  }
+
   return (
     <>
       <h1>Ledger Statement</h1>
@@ -44,6 +60,7 @@ export default function LedgerStatement() {
         <div className="field"><label>To</label>
           <input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></div>
         <button className="primary" onClick={load}>Show</button>
+        <button className="ghost" onClick={exportCsv} disabled={!rows.length}>Export CSV</button>
         <button className="ghost" onClick={() => window.print()}>Print</button>
       </div>
 

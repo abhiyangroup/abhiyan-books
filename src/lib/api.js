@@ -1,8 +1,15 @@
 import { createClient } from '@supabase/supabase-js'
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config'
 
+// persistSession:false keeps the session in memory only. Closing or
+// reloading the tab drops it, so the password is required again -- nothing
+// is left behind in the browser on a shared machine.
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-  auth: { persistSession: true, autoRefreshToken: true },
+  auth: {
+    persistSession: false,
+    autoRefreshToken: true,
+    detectSessionInUrl: false,
+  },
 })
 
 // ---------------------------------------------------------------- helpers
@@ -128,4 +135,10 @@ export const api = {
     if (!sess?.user) return null
     return run(supabase.from('profiles').select('*').eq('id', sess.user.id).single())
   },
+
+  // admin only -- RLS returns nothing for anyone else
+  users: () => run(supabase.from('v_users').select('*').order('created_at')),
+
+  setUserRole: (email, role) =>
+    run(supabase.rpc('set_user_role', { p_email: email, p_role: role })),
 }

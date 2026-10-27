@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api, money } from '../lib/api'
-import { adToBs, bsToAd, todayBs } from '../lib/nepaliDate'
-import NepaliDateInput from '../components/NepaliDateInput'
+import NepaliDateInput, { adToBs, bsToAd, todayBs } from '../components/NepaliDateInput'
 
 /* ---------- account classification (from Tally groups) ---------- */
 const grp = (l) => `${l?.group_name || ''} ${l?.primary_group || ''}`

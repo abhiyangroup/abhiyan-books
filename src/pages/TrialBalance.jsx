@@ -1,16 +1,20 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { api, money, drcr, today, fyStart } from '../lib/api'
+import { api, money, drcr } from '../lib/api'
 import { downloadCsv, num, COMPANY } from '../lib/csv'
+import NepaliDateInput, { bsToAd, todayBs, bsFyStart, longBs } from '../components/NepaliDateInput'
 
 export default function TrialBalance() {
-  const [from, setFrom] = useState(fyStart())
-  const [to, setTo] = useState(today())
+  const [from, setFrom] = useState(bsFyStart())
+  const [to, setTo] = useState(todayBs())
   const [rows, setRows] = useState([])
   const [hideZero, setHideZero] = useState(true)
   const [err, setErr] = useState('')
 
-  function load() { api.trialBalance(from, to).then(setRows).catch((e) => setErr(e.message)) }
+  function load() {
+    setErr('')
+    api.trialBalance(bsToAd(from), bsToAd(to)).then(setRows).catch((e) => setErr(e.message))
+  }
   useEffect(load, [])
 
   const shown = rows.filter((r) => !hideZero ||
@@ -35,7 +39,7 @@ export default function TrialBalance() {
                 num(r.debit), num(r.credit),
                 num(c.amount), c.amount ? c.side : '']
       }),
-      [COMPANY, 'Trial Balance', `Period: ${from} to ${to}`]
+      [COMPANY, 'Trial Balance', `Period: ${from} to ${to} (BS)`]
     )
   }
 
@@ -44,14 +48,14 @@ export default function TrialBalance() {
   return (
     <>
       <h1>Trial Balance</h1>
-      <p className="sub">{from} to {to}</p>
+      <p className="sub">{longBs(from)} to {longBs(to)}</p>
       {err && <div className="err">{err}</div>}
 
       <div className="toolbar">
-        <div className="field"><label>From</label>
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></div>
-        <div className="field"><label>To</label>
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></div>
+        <div className="field"><label>From (BS)</label>
+          <NepaliDateInput value={from} onChange={setFrom} /></div>
+        <div className="field"><label>To (BS)</label>
+          <NepaliDateInput value={to} onChange={setTo} /></div>
         <button className="primary" onClick={load}>Show</button>
         <label className="small" style={{ alignSelf: 'center' }}>
           <input type="checkbox" checked={hideZero} onChange={(e) => setHideZero(e.target.checked)} /> hide nil accounts

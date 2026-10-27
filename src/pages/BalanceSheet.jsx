@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { api, money, today } from '../lib/api'
+import { api, money } from '../lib/api'
 import { downloadCsv, num, COMPANY } from '../lib/csv'
+import NepaliDateInput, { bsToAd, todayBs, longBs } from '../components/NepaliDateInput'
 
 function Side({ title, rows }) {
   const total = rows.reduce((s, r) => s + Number(r.amount), 0)
@@ -29,11 +30,14 @@ function Side({ title, rows }) {
 }
 
 export default function BalanceSheet() {
-  const [asOn, setAsOn] = useState(today())
+  const [asOn, setAsOn] = useState(todayBs())
   const [rows, setRows] = useState([])
   const [err, setErr] = useState('')
 
-  function load() { api.balanceSheet(asOn).then(setRows).catch((e) => setErr(e.message)) }
+  function load() {
+    setErr('')
+    api.balanceSheet(bsToAd(asOn)).then(setRows).catch((e) => setErr(e.message))
+  }
   useEffect(load, [])
 
   const assets = rows.filter((r) => r.side === 'assets')
@@ -51,18 +55,18 @@ export default function BalanceSheet() {
                num(assets.reduce((s, r) => s + Number(r.amount), 0))])
 
     downloadCsv('balance-sheet', ['Side', 'Group', 'Ledger', 'Amount'], body,
-      [COMPANY, 'Balance Sheet', `As on: ${asOn}`])
+      [COMPANY, 'Balance Sheet', `As on: ${asOn} (BS) / ${bsToAd(asOn)} (AD)`])
   }
 
   return (
     <>
       <h1>Balance Sheet</h1>
-      <p className="sub">As on {asOn}</p>
+      <p className="sub">As on {longBs(asOn)}</p>
       {err && <div className="err">{err}</div>}
 
       <div className="toolbar">
-        <div className="field"><label>As on</label>
-          <input type="date" value={asOn} onChange={(e) => setAsOn(e.target.value)} /></div>
+        <div className="field"><label>As on (BS)</label>
+          <NepaliDateInput value={asOn} onChange={setAsOn} /></div>
         <button className="primary" onClick={load}>Show</button>
         <button className="ghost" onClick={exportCsv}>Export CSV</button>
         <button className="ghost" onClick={() => window.print()}>Print</button>

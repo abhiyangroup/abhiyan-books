@@ -1,17 +1,21 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { api, money, today, fyStart } from '../lib/api'
+import { api, money } from '../lib/api'
 import { downloadCsv, num, COMPANY } from '../lib/csv'
+import { adToBs, bsToAd, todayBs, bsFyStart } from '../lib/nepaliDate'
+import NepaliDateInput, { BsDate } from '../components/NepaliDateInput'
 
 export default function DayBook() {
-  const [from, setFrom] = useState(fyStart())
-  const [to, setTo] = useState(today())
+  // period is chosen in BS; the API still receives AD
+  const [from, setFrom] = useState(bsFyStart())
+  const [to, setTo] = useState(todayBs())
   const [rows, setRows] = useState([])
   const [q, setQ] = useState('')
   const [err, setErr] = useState('')
 
   function load() {
-    api.daybook(from, to).then(setRows).catch((e) => setErr(e.message))
+    setErr('')
+    api.daybook(bsToAd(from), bsToAd(to)).then(setRows).catch((e) => setErr(e.message))
   }
   useEffect(load, [])
 
@@ -27,28 +31,28 @@ export default function DayBook() {
   function exportCsv() {
     downloadCsv(
       'day-book',
-      ['Date', 'BS Date', 'Voucher No', 'Type', 'Debit Ledgers',
+      ['Date (BS)', 'Date (AD)', 'Voucher No', 'Type', 'Debit Ledgers',
        'Credit Ledgers', 'Reference', 'Narration', 'Amount', 'Cancelled'],
       filtered.map((r) => [
-        r.date, r.nepali_date, r.voucher_no, r.voucher_type,
+        adToBs(r.date), String(r.date).slice(0, 10), r.voucher_no, r.voucher_type,
         r.debit_ledgers, r.credit_ledgers, r.reference, r.narration,
         num(r.amount), r.is_cancelled ? 'yes' : '',
       ]),
-      [COMPANY, 'Day Book', `Period: ${from} to ${to}`]
+      [COMPANY, 'Day Book', `Period: ${from} to ${to} (BS)`]
     )
   }
 
   return (
     <>
       <h1>Day Book</h1>
-      <p className="sub">All vouchers in the selected period.</p>
+      <p className="sub">All vouchers from {from} to {to} (BS).</p>
       {err && <div className="err">{err}</div>}
 
       <div className="toolbar">
-        <div className="field"><label>From</label>
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></div>
-        <div className="field"><label>To</label>
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></div>
+        <div className="field"><label>From (BS)</label>
+          <NepaliDateInput value={from} onChange={setFrom} /></div>
+        <div className="field"><label>To (BS)</label>
+          <NepaliDateInput value={to} onChange={setTo} /></div>
         <button className="primary" onClick={load}>Show</button>
         <div className="field" style={{ flex: 1, minWidth: 180 }}>
           <label>Search</label>
@@ -62,15 +66,14 @@ export default function DayBook() {
         <table>
           <thead>
             <tr>
-              <th>Date</th><th>BS</th><th>No.</th><th>Type</th>
+              <th>Date</th><th>No.</th><th>Type</th>
               <th>Debit</th><th>Credit</th><th>Narration</th><th className="num">Amount</th>
             </tr>
           </thead>
           <tbody>
             {filtered.map((r) => (
               <tr key={r.id} style={r.is_cancelled ? { textDecoration: 'line-through', opacity: .6 } : null}>
-                <td>{r.date}</td>
-                <td className="small muted">{r.nepali_date}</td>
+                <td><BsDate ad={r.date} /></td>
                 <td><Link to={`/voucher/${r.id}`}>{r.voucher_no}</Link></td>
                 <td>{r.voucher_type}</td>
                 <td className="small dr">{r.debit_ledgers}</td>
@@ -79,9 +82,9 @@ export default function DayBook() {
                 <td className="num">{money(r.amount)}</td>
               </tr>
             ))}
-            {!filtered.length && <tr><td colSpan={8} className="muted">No vouchers in this period.</td></tr>}
+            {!filtered.length && <tr><td colSpan={7} className="muted">No vouchers in this period.</td></tr>}
             {!!filtered.length && (
-              <tr className="total"><td colSpan={7}>Total ({filtered.length} vouchers)</td>
+              <tr className="total"><td colSpan={6}>Total ({filtered.length} vouchers)</td>
                 <td className="num">{money(total)}</td></tr>
             )}
           </tbody>

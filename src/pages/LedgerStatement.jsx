@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { api, money, drcr, today, fyStart } from '../lib/api'
+import { api, money, drcr } from '../lib/api'
 import { downloadCsv, num, COMPANY } from '../lib/csv'
+import NepaliDateInput, { BsDate, adToBs, bsToAd, todayBs, bsFyStart, longBs } from '../components/NepaliDateInput'
 
 export default function LedgerStatement() {
   const [params] = useSearchParams()
   const [ledgers, setLedgers] = useState([])
   const [ledgerId, setLedgerId] = useState(params.get('ledger') || '')
-  const [from, setFrom] = useState(fyStart())
-  const [to, setTo] = useState(today())
+  const [from, setFrom] = useState(bsFyStart())
+  const [to, setTo] = useState(todayBs())
   const [rows, setRows] = useState([])
   const [err, setErr] = useState('')
 
@@ -16,7 +17,8 @@ export default function LedgerStatement() {
 
   function load() {
     if (!ledgerId) return
-    api.ledgerStatement(ledgerId, from, to).then(setRows).catch((e) => setErr(e.message))
+    setErr('')
+    api.ledgerStatement(ledgerId, bsToAd(from), bsToAd(to)).then(setRows).catch((e) => setErr(e.message))
   }
   useEffect(load, [ledgerId])
 
@@ -24,27 +26,30 @@ export default function LedgerStatement() {
   const totDr = txns.reduce((s, r) => s + Number(r.debit || 0), 0)
   const totCr = txns.reduce((s, r) => s + Number(r.credit || 0), 0)
   const closing = rows.length ? drcr(rows[rows.length - 1].running) : null
-  const name = ledgers.find((l) => l.id === ledgerId)?.name
+  const name = ledgers.find((l) => String(l.id) === String(ledgerId))?.name
 
   function exportCsv() {
     downloadCsv(
       `ledger-${(name || 'statement').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`,
-      ['Date', 'BS Date', 'Voucher No', 'Type', 'Particulars', 'Narration',
+      ['Date (BS)', 'Date (AD)', 'Voucher No', 'Type', 'Particulars', 'Narration',
        'Debit', 'Credit', 'Balance', 'Dr/Cr'],
       rows.map((r) => {
         const b = drcr(r.running)
-        return [r.vdate, r.nepali_date, r.voucher_no, r.voucher_type,
+        return [r.vdate ? adToBs(r.vdate) : '', r.vdate ? String(r.vdate).slice(0, 10) : '',
+                r.voucher_no, r.voucher_type,
                 r.particulars, r.narration, num(r.debit), num(r.credit),
                 num(b.amount), b.side]
       }),
-      [COMPANY, `Ledger Statement: ${name || ''}`, `Period: ${from} to ${to}`]
+      [COMPANY, `Ledger Statement: ${name || ''}`, `Period: ${from} to ${to} (BS)`]
     )
   }
 
   return (
     <>
       <h1>Ledger Statement</h1>
-      <p className="sub">{name || 'Pick a ledger to see its account.'}</p>
+      <p className="sub">
+        {name ? `${name} · ${longBs(from)} to ${longBs(to)}` : 'Pick a ledger to see its account.'}
+      </p>
       {err && <div className="err">{err}</div>}
 
       <div className="toolbar">
@@ -55,10 +60,10 @@ export default function LedgerStatement() {
             {ledgers.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select>
         </div>
-        <div className="field"><label>From</label>
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></div>
-        <div className="field"><label>To</label>
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></div>
+        <div className="field"><label>From (BS)</label>
+          <NepaliDateInput value={from} onChange={setFrom} /></div>
+        <div className="field"><label>To (BS)</label>
+          <NepaliDateInput value={to} onChange={setTo} /></div>
         <button className="primary" onClick={load}>Show</button>
         <button className="ghost" onClick={exportCsv} disabled={!rows.length}>Export CSV</button>
         <button className="ghost" onClick={() => window.print()}>Print</button>
@@ -78,7 +83,7 @@ export default function LedgerStatement() {
                 const b = drcr(r.running)
                 return (
                   <tr key={i}>
-                    <td>{r.vdate || ''}</td>
+                    <td>{r.vdate ? <BsDate ad={r.vdate} /> : ''}</td>
                     <td>{r.voucher_id ? <Link to={`/voucher/${r.voucher_id}`}>{r.voucher_no}</Link> : <em>{r.voucher_no}</em>}</td>
                     <td>{r.voucher_type}</td>
                     <td className="small">{r.particulars}{r.narration ? <div className="muted">{r.narration}</div> : null}</td>

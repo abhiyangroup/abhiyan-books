@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { api, money, today } from '../lib/api'
+import { api, money } from '../lib/api'
+import { adToBs, bsToAd, todayBs } from '../lib/nepaliDate'
+import NepaliDateInput from '../components/NepaliDateInput'
 
 /* ---------- account classification (from Tally groups) ---------- */
 const grp = (l) => `${l?.group_name || ''} ${l?.primary_group || ''}`
@@ -134,8 +136,9 @@ export default function VoucherForm() {
   const [ledgers, setLedgers] = useState([])
   const [typeId, setTypeId] = useState('')
   const [modeKey, setModeKey] = useState('')
-  const [date, setDate] = useState(today())
-  const [nepaliDate, setNepaliDate] = useState('')
+  // BS is the main date; AD is always derived from it
+  const [nepaliDate, setNepaliDate] = useState(todayBs())
+  const date = bsToAd(nepaliDate)
   const [voucherNo, setVoucherNo] = useState('')
   const [reference, setReference] = useState('')
   const [narration, setNarration] = useState('')
@@ -174,8 +177,8 @@ export default function VoucherForm() {
         }
 
         setTypeId(v.voucher_type_id)
-        setDate(v.date)
-        setNepaliDate(v.nepali_date || '')
+        // derive BS from the stored AD date so the two can never disagree
+        setNepaliDate(adToBs(v.date) || v.nepali_date || '')
         setVoucherNo(v.voucher_no)
         setReference(v.reference || '')
         setNarration(v.narration || '')
@@ -306,6 +309,7 @@ export default function VoucherForm() {
   async function save(e) {
     e.preventDefault()
     setErr(''); setOk('')
+    if (!date) return setErr('Enter a valid Nepali date (YYYY-MM-DD).')
     let entries
     try { entries = buildEntries() } catch (x) { return setErr(x.message) }
 
@@ -392,13 +396,8 @@ export default function VoucherForm() {
             <input value={voucherNo} onChange={(e) => setVoucherNo(e.target.value)} style={{ width: 120 }} />
           </div>
           <div className="field">
-            <label>Date (AD)</label>
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
-          </div>
-          <div className="field">
             <label>Date (BS)</label>
-            <input value={nepaliDate} placeholder="2081-05-06"
-                   onChange={(e) => setNepaliDate(e.target.value)} style={{ width: 110 }} />
+            <NepaliDateInput value={nepaliDate} onChange={(bs) => setNepaliDate(bs)} required />
           </div>
           <div className="field" style={{ flex: 1, minWidth: 160 }}>
             <label>Reference</label>

@@ -73,6 +73,23 @@ const RULES = [
 const ruleFor = (type) =>
   type ? RULES.find((r) => type.name.toLowerCase().includes(r.match)) || null : null
 
+/* ---------- Simple | Dr/Cr segmented switch ---------- */
+const GREEN = 'var(--primary, #17532f)'
+const seg = {
+  wrap: {
+    display: 'inline-flex', padding: 4, gap: 4, borderRadius: 999,
+    background: '#eef2ef', border: '1px solid #dfe6e1',
+  },
+  btn: {
+    border: 0, background: 'transparent', color: '#4b5563', cursor: 'pointer',
+    padding: '8px 20px', borderRadius: 999, fontSize: 15, fontWeight: 500,
+    transition: 'background .15s, color .15s, box-shadow .15s',
+  },
+  on: {
+    background: GREEN, color: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,.18)',
+  },
+}
+
 /* ---------- helpers ---------- */
 const flip = (s) => (s === 'Dr' ? 'Cr' : 'Dr')
 const amt = (v) => parseFloat(v) || 0
@@ -328,12 +345,36 @@ export default function VoucherForm() {
 
   return (
     <form onSubmit={save}>
-      <h1>{id ? `Edit voucher ${voucherNo}` : 'New voucher'}</h1>
-      <p className="sub">
-        {simple
-          ? 'Choose how it was paid, then enter the amounts — debit and credit are handled for you.'
-          : 'Choose Dr or Cr for each line. Debits must equal credits before saving.'}
-      </p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
+        <div>
+          <h1>{id ? `Edit voucher ${voucherNo}` : 'New voucher'}</h1>
+          <p className="sub">
+            {simple
+              ? 'Choose how it was paid, then enter the amounts — debit and credit are handled for you.'
+              : 'Choose Dr or Cr for each line. Debits must equal credits before saving.'}
+          </p>
+        </div>
+
+        {rule && (
+          <div style={{ textAlign: 'right' }}>
+            <div className="small muted" style={{ marginBottom: 6, letterSpacing: '.04em', textTransform: 'uppercase' }}>
+              Entry view
+            </div>
+            <div role="tablist" style={seg.wrap}>
+              <button type="button" role="tab" aria-selected={simple}
+                      style={{ ...seg.btn, ...(simple ? seg.on : null) }}
+                      onClick={() => !simple && toggleView()}>
+                Simple
+              </button>
+              <button type="button" role="tab" aria-selected={!simple}
+                      style={{ ...seg.btn, ...(!simple ? seg.on : null) }}
+                      onClick={() => simple && toggleView()}>
+                Dr / Cr
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
 
       {err && <div className="err">{err}</div>}
       {ok && <div className="ok">{ok}</div>}
@@ -471,11 +512,6 @@ export default function VoucherForm() {
 
       <div className="toolbar" style={{ marginTop: 14 }}>
         <button type="button" className="ghost" onClick={addLine}>+ Add line</button>
-        {rule && (
-          <button type="button" className="link" onClick={toggleView}>
-            {simple ? 'Switch to Dr/Cr view' : 'Switch to simple view'}
-          </button>
-        )}
         <div className="field" style={{ flex: 1, minWidth: 220 }}>
           <label>Narration</label>
           <input value={narration} onChange={(e) => setNarration(e.target.value)} />

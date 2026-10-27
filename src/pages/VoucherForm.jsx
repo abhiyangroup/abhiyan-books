@@ -2,7 +2,112 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api, money, today } from '../lib/api'
 
-const blank = () => ({ ledger_id: '', debit: '', credit: '', line_narration: '' })
+/* ---------- account classification (from Tally groups) ---------- */
+const grp = (l) => `${l?.group_name || ''} ${l?.primary_group || ''}`
+const kindOf = (l) => {
+  if (!l) return 'other'
+  const g = grp(l)
+  if (/cash/i.test(g)) return 'cash'
+  if (/bank/i.test(g)) return 'bank'            // includes Bank OD
+  if (/debtor|creditor|customer|supplier|party/i.test(g)) return 'party'
+  return 'other'
+}
+const sameId = (a, b) => String(a) === String(b)
+const inList = (list, id) => list.some((x) => sameId(x.id, id))
+
+// ledgers for a kind; falls back gracefully if groups aren't recognised
+function ledgersOfKind(ledgers, kind) {
+  if (kind === 'party') {
+    const p = ledgers.filter((l) => kindOf(l) === 'party')
+    return p.length ? p : ledgers.filter((l) => !['cash', 'bank'].includes(kindOf(l)))
+  }
+  const k = ledgers.filter((l) => kindOf(l) === kind)
+  return k.length ? k : ledgers
+}
+function lineOptions(ledgers, mode) {
+  if (mode.lineKind) return ledgersOfKind(ledgers, mode.lineKind)
+  const nonCash = ledgers.filter((l) => !['cash', 'bank'].includes(kindOf(l)))
+  return nonCash.length ? nonCash : ledgers
+}
+
+/*
+  head  = side of the main account; lines go to the opposite side.
+  modes = the choice shown at the top (Cash / Bank / Credit …).
+  Types not listed (Journal) use the Dr/Cr view.
+*/
+const RULES = [
+  { match: 'payment', head: 'Cr', lineLabel: 'Paid to', modes: [
+    { key: 'cash', label: 'Cash', headKind: 'cash', headLabel: 'Paid from cash' },
+    { key: 'bank', label: 'Bank', headKind: 'bank', headLabel: 'Paid from bank' },
+  ]},
+  { match: 'receipt', head: 'Dr', lineLabel: 'Received from', modes: [
+    { key: 'cash', label: 'Cash', headKind: 'cash', headLabel: 'Received in cash' },
+    { key: 'bank', label: 'Bank', headKind: 'bank', headLabel: 'Received in bank' },
+  ]},
+  { match: 'contra', head: 'Cr', modes: [
+    { key: 'deposit',  label: 'Cash → Bank', headKind: 'cash', headLabel: 'From cash', lineKind: 'bank', lineLabel: 'Deposited into bank' },
+    { key: 'withdraw', label: 'Bank → Cash', headKind: 'bank', headLabel: 'From bank', lineKind: 'cash', lineLabel: 'Into cash' },
+    { key: 'transfer', label: 'Bank → Bank', headKind: 'bank', headLabel: 'From bank', lineKind: 'bank', lineLabel: 'To bank' },
+  ]},
+  { match: 'credit note', head: 'Cr', lineLabel: 'Sales return / VAT', modes: [
+    { key: 'credit', label: 'Adjust customer', headKind: 'party', headLabel: 'Customer' },
+    { key: 'cash',   label: 'Cash refund',     headKind: 'cash',  headLabel: 'Refund from cash' },
+    { key: 'bank',   label: 'Bank refund',     headKind: 'bank',  headLabel: 'Refund from bank' },
+  ]},
+  { match: 'debit note', head: 'Dr', lineLabel: 'Purchase return / VAT', modes: [
+    { key: 'credit', label: 'Adjust supplier', headKind: 'party', headLabel: 'Supplier' },
+    { key: 'cash',   label: 'Cash refund',     headKind: 'cash',  headLabel: 'Refund received in cash' },
+    { key: 'bank',   label: 'Bank refund',     headKind: 'bank',  headLabel: 'Refund received in bank' },
+  ]},
+  { match: 'sales', head: 'Dr', lineLabel: 'Sales / VAT account', modes: [
+    { key: 'cash',   label: 'Cash',      headKind: 'cash',  headLabel: 'Received in cash' },
+    { key: 'bank',   label: 'Bank',      headKind: 'bank',  headLabel: 'Received in bank' },
+    { key: 'credit', label: 'On credit', headKind: 'party', headLabel: 'Customer' },
+  ]},
+  { match: 'purchase', head: 'Cr', lineLabel: 'Purchase / VAT account', modes: [
+    { key: 'cash',   label: 'Cash',      headKind: 'cash',  headLabel: 'Paid from cash' },
+    { key: 'bank',   label: 'Bank',      headKind: 'bank',  headLabel: 'Paid from bank' },
+    { key: 'credit', label: 'On credit', headKind: 'party', headLabel: 'Supplier' },
+  ]},
+]
+const ruleFor = (type) =>
+  type ? RULES.find((r) => type.name.toLowerCase().includes(r.match)) || null : null
+
+/* ---------- helpers ---------- */
+const flip = (s) => (s === 'Dr' ? 'Cr' : 'Dr')
+const amt = (v) => parseFloat(v) || 0
+const newLine = (side = 'Dr', amount = '') => ({ ledger_id: '', side, amount, line_narration: '' })
+const blankHead = () => ({ ledger_id: '', line_narration: '' })
+const freshLines = (rule) => (rule ? [newLine()] : [newLine('Dr'), newLine('Cr')])
+const isBlank = (ls) => ls.every((l) => !l.ledger_id && !amt(l.amount))
+
+// keep current main account if allowed, else auto-pick when there's only one (e.g. single Cash ledger)
+function pickHead(ledgers, mode, currentId) {
+  const opts = ledgersOfKind(ledgers, mode.headKind)
+  if (currentId && inList(opts, currentId)) return currentId
+  return opts.length === 1 ? opts[0].id : ''
+}
+
+// Dr/Cr lines -> one main account + other lines
+function fit(rule, ls) {
+  if (!rule) return null
+  const used = ls.filter((l) => l.ledger_id || amt(l.amount))
+  const heads = used.filter((l) => l.side === rule.head)
+  if (heads.length !== 1) return null
+  const rest = used.filter((l) => l !== heads[0])
+  return {
+    head: { ledger_id: heads[0].ledger_id, line_narration: heads[0].line_narration },
+    lines: rest.length ? rest : [newLine()],
+  }
+}
+
+// which Cash/Bank/Credit option an existing entry belongs to
+function inferMode(rule, ledgers, head, ls) {
+  return rule.modes.find((m) =>
+    inList(ledgersOfKind(ledgers, m.headKind), head.ledger_id) &&
+    ls.every((l) => !l.ledger_id || inList(lineOptions(ledgers, m), l.ledger_id))
+  ) || null
+}
 
 export default function VoucherForm() {
   const { id } = useParams()
@@ -11,80 +116,181 @@ export default function VoucherForm() {
   const [types, setTypes] = useState([])
   const [ledgers, setLedgers] = useState([])
   const [typeId, setTypeId] = useState('')
+  const [modeKey, setModeKey] = useState('')
   const [date, setDate] = useState(today())
   const [nepaliDate, setNepaliDate] = useState('')
   const [voucherNo, setVoucherNo] = useState('')
   const [reference, setReference] = useState('')
   const [narration, setNarration] = useState('')
-  const [lines, setLines] = useState([blank(), blank()])
+  const [head, setHead] = useState(blankHead())
+  const [lines, setLines] = useState([newLine()])
+  const [forceAdvanced, setForceAdvanced] = useState(false)
   const [err, setErr] = useState('')
   const [ok, setOk] = useState('')
   const [busy, setBusy] = useState(false)
 
+  const type = types.find((t) => sameId(t.id, typeId))
+  const rule = ruleFor(type)
+  const simple = !!rule && !forceAdvanced
+  const mode = rule ? rule.modes.find((m) => m.key === modeKey) || rule.modes[0] : null
+
+  const headOpts = simple ? ledgersOfKind(ledgers, mode.headKind) : []
+  const lineOpts = simple ? lineOptions(ledgers, mode) : ledgers
+
+  /* load masters (+ voucher when editing) — api.ledgers() returns group_name / primary_group */
   useEffect(() => {
-    Promise.all([api.voucherTypes(), api.ledgerList()])
-      .then(([t, l]) => {
+    Promise.all([api.voucherTypes(), api.ledgers(), id ? api.voucher(id) : null])
+      .then(([t, l, v]) => {
         setTypes(t)
         setLedgers(l)
-        if (!id && t.length) setTypeId(t[0].id)
-      })
-      .catch((e) => setErr(e.message))
-  }, [id])
 
-  // load an existing voucher for editing
-  useEffect(() => {
-    if (!id) return
-    api.voucher(id)
-      .then((v) => {
+        if (!v) {
+          if (!t.length) return
+          const r = ruleFor(t[0])
+          setTypeId(t[0].id)
+          setLines(freshLines(r))
+          if (r) {
+            setModeKey(r.modes[0].key)
+            setHead({ ...blankHead(), ledger_id: pickHead(l, r.modes[0], '') })
+          }
+          return
+        }
+
         setTypeId(v.voucher_type_id)
         setDate(v.date)
         setNepaliDate(v.nepali_date || '')
         setVoucherNo(v.voucher_no)
         setReference(v.reference || '')
         setNarration(v.narration || '')
-        setLines(
-          v.lines.map((l) => ({
-            ledger_id: l.ledger_id,
-            debit: Number(l.debit) ? String(l.debit) : '',
-            credit: Number(l.credit) ? String(l.credit) : '',
-            line_narration: l.line_narration || '',
-          }))
-        )
+
+        const ls = v.lines.map((x) => ({
+          ledger_id: x.ledger_id,
+          side: Number(x.debit) > 0 ? 'Dr' : 'Cr',
+          amount: String(Number(x.debit) || Number(x.credit) || ''),
+          line_narration: x.line_narration || '',
+        }))
+        const r = ruleFor(t.find((x) => sameId(x.id, v.voucher_type_id)))
+        const f = fit(r, ls)
+        const m = f && inferMode(r, l, f.head, f.lines)
+        if (m) { setModeKey(m.key); setHead(f.head); setLines(f.lines); setForceAdvanced(false) }
+        else { setLines(ls); setForceAdvanced(!!r) }
       })
       .catch((e) => setErr(e.message))
   }, [id])
 
-  // suggest the next voucher number for a new voucher
   useEffect(() => {
     if (id || !typeId) return
     api.nextVoucherNo(typeId).then(setVoucherNo).catch(() => {})
   }, [typeId, id])
 
   const totals = useMemo(() => {
-    const dr = lines.reduce((s, l) => s + (parseFloat(l.debit) || 0), 0)
-    const cr = lines.reduce((s, l) => s + (parseFloat(l.credit) || 0), 0)
-    return { dr, cr, diff: +(dr - cr).toFixed(2) }
-  }, [lines])
+    if (simple) {
+      const t = lines.reduce((s, l) => s + amt(l.amount), 0)
+      return { dr: t, cr: t, total: t, diff: 0 }
+    }
+    const dr = lines.reduce((s, l) => s + (l.side === 'Dr' ? amt(l.amount) : 0), 0)
+    const cr = lines.reduce((s, l) => s + (l.side === 'Cr' ? amt(l.amount) : 0), 0)
+    return { dr, cr, total: dr, diff: +(dr - cr).toFixed(2) }
+  }, [lines, simple])
+
+  const ledgerName = (lid) => ledgers.find((x) => sameId(x.id, lid))?.name || ''
 
   function setLine(i, patch) {
     setLines((prev) => prev.map((l, k) => (k === i ? { ...l, ...patch } : l)))
   }
 
+  // switch Cash / Bank / Credit
+  function applyMode(m, h = head, ls = lines) {
+    const allowed = lineOptions(ledgers, m)
+    setModeKey(m.key)
+    setHead({ ...h, ledger_id: pickHead(ledgers, m, h.ledger_id) })
+    setLines(ls.map((l) => (inList(allowed, l.ledger_id) ? l : { ...l, ledger_id: '' })))
+    setForceAdvanced(false)
+  }
+
+  function toAdvancedLines() {
+    return [
+      { ...head, side: rule.head, amount: totals.total ? String(totals.total) : '' },
+      ...lines.map((l) => ({ ...l, side: flip(rule.head) })),
+    ]
+  }
+
+  function changeType(newId) {
+    const newRule = ruleFor(types.find((t) => sameId(t.id, newId)))
+    setErr('')
+    setTypeId(newId)
+
+    if (!newRule) {                       // -> Journal
+      if (simple) setLines(toAdvancedLines())
+      setForceAdvanced(false)
+      return
+    }
+    if (simple) {                         // simple -> simple: keep entries, same option if it exists
+      return applyMode(newRule.modes.find((m) => m.key === modeKey) || newRule.modes[0])
+    }
+    if (isBlank(lines)) return applyMode(newRule.modes[0], blankHead(), freshLines(newRule))
+    const f = fit(newRule, lines)
+    const m = f && inferMode(newRule, ledgers, f.head, f.lines)
+    if (m) applyMode(m, f.head, f.lines)
+    else setForceAdvanced(true)
+  }
+
+  function toggleView() {
+    setErr('')
+    if (simple) { setLines(toAdvancedLines()); setForceAdvanced(true); return }
+    const f = fit(rule, lines)
+    const m = f && inferMode(rule, ledgers, f.head, f.lines)
+    if (!m) return setErr('This entry has more than one main account, so it can only be shown in Dr/Cr view.')
+    applyMode(m, f.head, f.lines)
+  }
+
+  function addLine() {
+    if (simple) return setLines([...lines, newLine()])
+    const d = totals.diff
+    setLines([...lines, d > 0 ? newLine('Cr', String(d)) : d < 0 ? newLine('Dr', String(-d)) : newLine('Dr')])
+  }
+
+  function buildEntries() {
+    const bad = lines.findIndex((l) => !l.ledger_id && amt(l.amount) > 0)
+    if (bad >= 0) throw new Error(`Line ${bad + 1} has an amount but no account.`)
+    const filled = lines.filter((l) => l.ledger_id && amt(l.amount) > 0)
+
+    if (simple) {
+      if (!head.ledger_id) throw new Error(`Choose the "${mode.headLabel}" account.`)
+      if (!filled.length) throw new Error('Add at least one line with an amount.')
+      if (filled.some((l) => sameId(l.ledger_id, head.ledger_id)))
+        throw new Error(`${ledgerName(head.ledger_id)} can't be on both sides.`)
+      const total = filled.reduce((s, l) => s + amt(l.amount), 0)
+      const headDr = rule.head === 'Dr'
+      return [
+        { ledger_id: head.ledger_id, debit: headDr ? total : 0, credit: headDr ? 0 : total,
+          line_narration: head.line_narration || null },
+        ...filled.map((l) => ({
+          ledger_id: l.ledger_id,
+          debit: headDr ? 0 : amt(l.amount),
+          credit: headDr ? amt(l.amount) : 0,
+          line_narration: l.line_narration || null,
+        })),
+      ]
+    }
+
+    const entries = filled.map((l) => ({
+      ledger_id: l.ledger_id,
+      debit: l.side === 'Dr' ? amt(l.amount) : 0,
+      credit: l.side === 'Cr' ? amt(l.amount) : 0,
+      line_narration: l.line_narration || null,
+    }))
+    if (!entries.some((e) => e.debit) || !entries.some((e) => e.credit))
+      throw new Error('A voucher needs at least one debit and one credit line.')
+    if (totals.diff !== 0) throw new Error(`Voucher is out of balance by ${money(Math.abs(totals.diff))}.`)
+    return entries
+  }
+
   async function save(e) {
     e.preventDefault()
     setErr(''); setOk('')
-
-    const entries = lines
-      .filter((l) => l.ledger_id && ((parseFloat(l.debit) || 0) > 0 || (parseFloat(l.credit) || 0) > 0))
-      .map((l) => ({
-        ledger_id: l.ledger_id,
-        debit: parseFloat(l.debit) || 0,
-        credit: parseFloat(l.credit) || 0,
-        line_narration: l.line_narration || null,
-      }))
-
-    if (entries.length < 2) return setErr('A voucher needs at least one debit and one credit line.')
-    if (totals.diff !== 0) return setErr(`Voucher is out of balance by ${money(Math.abs(totals.diff))}.`)
+    let entries
+    try { entries = buildEntries() } catch (x) { return setErr(x.message) }
 
     setBusy(true)
     try {
@@ -93,7 +299,9 @@ export default function VoucherForm() {
       })
       setOk(`Saved ${voucherNo}.`)
       if (!id) {
-        setLines([blank(), blank()])
+        // keep Cash/Bank choice and main account for the next entry
+        setHead((h) => ({ ...h, line_narration: '' }))
+        setLines(freshLines(simple ? rule : null))
         setNarration(''); setReference('')
         api.nextVoucherNo(typeId).then(setVoucherNo).catch(() => {})
       } else {
@@ -111,10 +319,21 @@ export default function VoucherForm() {
     try { await api.deleteVoucher(id); nav('/daybook') } catch (e) { setErr(e.message) }
   }
 
+  const ledgerSelect = (options, value, onChange) => (
+    <select value={value} onChange={(e) => onChange(e.target.value)} style={{ width: '100%' }}>
+      <option value="">— select account —</option>
+      {options.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+    </select>
+  )
+
   return (
     <form onSubmit={save}>
       <h1>{id ? `Edit voucher ${voucherNo}` : 'New voucher'}</h1>
-      <p className="sub">Debits must equal credits before the voucher can be saved.</p>
+      <p className="sub">
+        {simple
+          ? 'Choose how it was paid, then enter the amounts — debit and credit are handled for you.'
+          : 'Choose Dr or Cr for each line. Debits must equal credits before saving.'}
+      </p>
 
       {err && <div className="err">{err}</div>}
       {ok && <div className="ok">{ok}</div>}
@@ -123,7 +342,7 @@ export default function VoucherForm() {
         <div className="toolbar">
           <div className="field">
             <label>Voucher type</label>
-            <select value={typeId} onChange={(e) => setTypeId(e.target.value)} required>
+            <select value={typeId} onChange={(e) => changeType(e.target.value)} required>
               {types.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
           </div>
@@ -145,67 +364,118 @@ export default function VoucherForm() {
             <input value={reference} onChange={(e) => setReference(e.target.value)} />
           </div>
         </div>
+
+        {simple && (
+          <div className="toolbar" style={{ marginBottom: 0, alignItems: 'flex-end' }}>
+            <div className="field">
+              <label>{rule.match === 'contra' ? 'Transfer' : 'Mode'}</label>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {rule.modes.map((m) => (
+                  <button key={m.key} type="button"
+                          className={m.key === mode.key ? 'primary' : 'ghost'}
+                          onClick={() => applyMode(m)}>
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="field" style={{ flex: 1, minWidth: 220 }}>
+              <label>{mode.headLabel}</label>
+              {ledgerSelect(headOpts, head.ledger_id, (v) => setHead({ ...head, ledger_id: v }))}
+            </div>
+            <div className="field">
+              <label>Total</label>
+              <div style={{ fontSize: 18, fontWeight: 600, padding: '4px 0' }}>{money(totals.total)}</div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
-              <th style={{ width: '34%' }}>Ledger</th>
+              <th style={{ width: '34%' }}>{simple ? (mode.lineLabel || rule.lineLabel) : 'Account'}</th>
               <th>Line narration</th>
-              <th className="num" style={{ width: 130 }}>Debit</th>
-              <th className="num" style={{ width: 130 }}>Credit</th>
+              {!simple && <th style={{ width: 80 }}>Dr / Cr</th>}
+              <th className="num" style={{ width: 140 }}>Amount</th>
               <th style={{ width: 40 }}></th>
             </tr>
           </thead>
           <tbody>
             {lines.map((l, i) => (
               <tr key={i}>
-                <td>
-                  <select value={l.ledger_id} onChange={(e) => setLine(i, { ledger_id: e.target.value })}
-                          style={{ width: '100%' }}>
-                    <option value="">— select ledger —</option>
-                    {ledgers.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-                  </select>
-                </td>
+                <td>{ledgerSelect(lineOpts, l.ledger_id, (v) => setLine(i, { ledger_id: v }))}</td>
                 <td>
                   <input value={l.line_narration} style={{ width: '100%' }}
                          onChange={(e) => setLine(i, { line_narration: e.target.value })} />
                 </td>
+                {!simple && (
+                  <td>
+                    <select value={l.side} onChange={(e) => setLine(i, { side: e.target.value })}
+                            className={l.side === 'Dr' ? 'dr' : 'cr'}>
+                      <option>Dr</option><option>Cr</option>
+                    </select>
+                  </td>
+                )}
                 <td className="num">
-                  <input type="number" step="0.01" min="0" value={l.debit} style={{ width: '100%', textAlign: 'right' }}
-                         onChange={(e) => setLine(i, { debit: e.target.value, credit: '' })} />
-                </td>
-                <td className="num">
-                  <input type="number" step="0.01" min="0" value={l.credit} style={{ width: '100%', textAlign: 'right' }}
-                         onChange={(e) => setLine(i, { credit: e.target.value, debit: '' })} />
+                  <input type="number" step="0.01" min="0" value={l.amount}
+                         style={{ width: '100%', textAlign: 'right' }}
+                         onChange={(e) => setLine(i, { amount: e.target.value })} />
                 </td>
                 <td>
                   <button type="button" className="link"
                           onClick={() => setLines(lines.filter((_, k) => k !== i))}
-                          disabled={lines.length <= 2}>✕</button>
+                          disabled={lines.length <= (simple ? 1 : 2)}>✕</button>
                 </td>
               </tr>
             ))}
-            <tr className="total">
-              <td colSpan={2}>Total</td>
-              <td className="num">{money(totals.dr)}</td>
-              <td className="num">{money(totals.cr)}</td>
-              <td></td>
-            </tr>
-            {totals.diff !== 0 && (
-              <tr>
-                <td colSpan={2} className="cr">Difference</td>
-                <td className="num cr" colSpan={2}>{money(Math.abs(totals.diff))} {totals.diff > 0 ? 'Dr' : 'Cr'}</td>
+
+            {simple ? (
+              <tr className="total">
+                <td colSpan={2}>Total</td>
+                <td className="num">{money(totals.total)}</td>
                 <td></td>
               </tr>
+            ) : (
+              <>
+                <tr className="total">
+                  <td colSpan={3}>Total</td>
+                  <td className="num">
+                    <span className="dr">{money(totals.dr)} Dr</span><br />
+                    <span className="cr">{money(totals.cr)} Cr</span>
+                  </td>
+                  <td></td>
+                </tr>
+                {totals.diff !== 0 && (
+                  <tr>
+                    <td colSpan={3} className="cr">Difference</td>
+                    <td className="num cr">{money(Math.abs(totals.diff))} {totals.diff > 0 ? 'Dr' : 'Cr'}</td>
+                    <td></td>
+                  </tr>
+                )}
+              </>
             )}
           </tbody>
         </table>
       </div>
 
+      {simple && head.ledger_id && totals.total > 0 && (
+        <p className="small muted" style={{ marginTop: 6 }}>
+          Posts as: {ledgerName(head.ledger_id)} {rule.head} {money(totals.total)} ·{' '}
+          {lines.filter((l) => l.ledger_id && amt(l.amount))
+                .map((l) => `${ledgerName(l.ledger_id)} ${flip(rule.head)} ${money(amt(l.amount))}`)
+                .join(' · ')}
+        </p>
+      )}
+
       <div className="toolbar" style={{ marginTop: 14 }}>
-        <button type="button" className="ghost" onClick={() => setLines([...lines, blank()])}>+ Add line</button>
+        <button type="button" className="ghost" onClick={addLine}>+ Add line</button>
+        {rule && (
+          <button type="button" className="link" onClick={toggleView}>
+            {simple ? 'Switch to Dr/Cr view' : 'Switch to simple view'}
+          </button>
+        )}
         <div className="field" style={{ flex: 1, minWidth: 220 }}>
           <label>Narration</label>
           <input value={narration} onChange={(e) => setNarration(e.target.value)} />

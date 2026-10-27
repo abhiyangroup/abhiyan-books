@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { api, money, today, fyStart } from '../lib/api'
+import { api, money } from '../lib/api'
 import { downloadCsv, num, COMPANY } from '../lib/csv'
+import NepaliDateInput, { bsToAd, todayBs, bsFyStart, longBs } from '../components/NepaliDateInput'
 
 function Section({ title, rows }) {
   if (!rows.length) return null
@@ -21,12 +22,15 @@ function Section({ title, rows }) {
 }
 
 export default function ProfitLoss() {
-  const [from, setFrom] = useState(fyStart())
-  const [to, setTo] = useState(today())
+  const [from, setFrom] = useState(bsFyStart())
+  const [to, setTo] = useState(todayBs())
   const [rows, setRows] = useState([])
   const [err, setErr] = useState('')
 
-  function load() { api.profitLoss(from, to).then(setRows).catch((e) => setErr(e.message)) }
+  function load() {
+    setErr('')
+    api.profitLoss(bsToAd(from), bsToAd(to)).then(setRows).catch((e) => setErr(e.message))
+  }
   useEffect(load, [])
 
   const pick = (s) => rows.filter((r) => r.section === s)
@@ -54,20 +58,20 @@ export default function ProfitLoss() {
     body.push(['', '', net >= 0 ? 'NET PROFIT' : 'NET LOSS', num(Math.abs(net))])
 
     downloadCsv('profit-and-loss', ['Section', 'Group', 'Ledger', 'Amount'], body,
-      [COMPANY, 'Profit & Loss Account', `Period: ${from} to ${to}`])
+      [COMPANY, 'Profit & Loss Account', `Period: ${from} to ${to} (BS)`])
   }
 
   return (
     <>
       <h1>Profit &amp; Loss Account</h1>
-      <p className="sub">{from} to {to}</p>
+      <p className="sub">{longBs(from)} to {longBs(to)}</p>
       {err && <div className="err">{err}</div>}
 
       <div className="toolbar">
-        <div className="field"><label>From</label>
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></div>
-        <div className="field"><label>To</label>
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></div>
+        <div className="field"><label>From (BS)</label>
+          <NepaliDateInput value={from} onChange={setFrom} /></div>
+        <div className="field"><label>To (BS)</label>
+          <NepaliDateInput value={to} onChange={setTo} /></div>
         <button className="primary" onClick={load}>Show</button>
         <button className="ghost" onClick={exportCsv}>Export CSV</button>
         <button className="ghost" onClick={() => window.print()}>Print</button>

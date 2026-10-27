@@ -2,8 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, money } from '../lib/api'
 import { downloadCsv, num, COMPANY } from '../lib/csv'
-import { adToBs, bsToAd, todayBs, bsFyStart } from '../lib/nepaliDate'
-import NepaliDateInput, { BsDate } from '../components/NepaliDateInput'
+import NepaliDateInput, { BsDate, adToBs, bsToAd, todayBs, bsFyStart } from '../components/NepaliDateInput'
 
 export default function DayBook() {
   // period is chosen in BS; the API still receives AD

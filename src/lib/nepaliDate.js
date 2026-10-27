@@ -1,4 +1,5 @@
 /*
+  README.md 
   Bikram Sambat (BS) <-> Gregorian (AD) conversion — exact, table based.
 
   Each row = one BS year, 12 digits = days in each month minus 28

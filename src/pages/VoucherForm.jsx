@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api, money } from '../lib/api'
-import NepaliDateInput, { adToBs, bsToAd, todayBs, daysInBsMonth } from '../components/NepaliDateInput'
+import NepaliDateInput, { adToBs, bsToAd, todayBs, daysInBsMonth, longBs } from '../components/NepaliDateInput'
 
 /* ---------- account classification (from Tally groups) ---------- */
 const grp = (l) => `${l?.group_name || ''} ${l?.primary_group || ''}`
@@ -98,16 +98,44 @@ const DEFAULT_PREFIX = {
   sales: 'SAL', purchase: 'PUR', 'credit note': 'CRN', 'debit note': 'DBN',
 }
 
-// Nepali fiscal year (1 Shrawan – end of Asar) for a BS date
-function fyOf(bs) {
-  const m = /^(\d{4})-(\d{2})-\d{2}$/.exec(bs || '')
-  if (!m) return null
-  const start = +m[2] >= 4 ? +m[1] : +m[1] - 1
+// Nepali fiscal year (1 Shrawan – end of Asar)
+const FIRST_FY = 2081   // earliest year offered in the "Financial year" list
+
+function fyFrom(start) {
   return {
+    start,
     from: `${start}-04-01`,
     to: `${start + 1}-03-${daysInBsMonth(start + 1, 3)}`,
     suffix: `${String(start).slice(2)}-${String(start + 1).slice(2)}`,   // 81-82
+    label: `${start}/${String(start + 1).slice(2)}`,                      // 2081/82
   }
+}
+
+function fyOf(bs) {
+  const m = /^(\d{4})-(\d{2})-\d{2}$/.exec(bs || '')
+  if (!m) return null
+  return fyFrom(+m[2] >= 4 ? +m[1] : +m[1] - 1)
+}
+
+function fyList() {
+  const cur = fyOf(todayBs())
+  const out = []
+  for (let y = Math.min(FIRST_FY, cur.start); y <= cur.start; y++) out.push(fyFrom(y))
+  return out.reverse()   // current year first
+}
+
+/* small per-browser memory: working year + last date used in each year */
+const store = {
+  get(k) { try { return localStorage.getItem('abhiyan-books:' + k) } catch { return null } },
+  set(k, v) { try { localStorage.setItem('abhiyan-books:' + k, v) } catch { /* ignore */ } },
+}
+
+// where the date should start for a fiscal year: last date used there, else today, else 1 Shrawan
+function startDateFor(f) {
+  const last = store.get('last-date:' + f.suffix)
+  if (last && last >= f.from && last <= f.to) return last
+  const t = todayBs()
+  return t >= f.from && t <= f.to ? t : f.from
 }
 
 const NUM_RE = /^(.*?)[-\s]?(\d+)(?:\/(\d{2}-\d{2}))?$/   // PMT-001/81-82 | PUR-0001
@@ -183,8 +211,19 @@ export default function VoucherForm() {
   const [ledgers, setLedgers] = useState([])
   const [typeId, setTypeId] = useState('')
   const [modeKey, setModeKey] = useState('')
+  // working financial year (new vouchers only) — remembered on this browser
+  const curFy = fyOf(todayBs())
+  const years = fyList()
+  const [workSuffix, setWorkSuffix] = useState(() => {
+    const s = store.get('work-fy')
+    return years.some((f) => f.suffix === s) ? s : curFy.suffix
+  })
+  const [askFy, setAskFy] = useState(() => !id && workSuffix !== curFy.suffix)
+  const [toast, setToast] = useState(null)
+
   // BS is the main date; AD is always derived from it
-  const [nepaliDate, setNepaliDate] = useState(todayBs())
+  const [nepaliDate, setNepaliDate] = useState(() =>
+    id ? todayBs() : startDateFor(years.find((f) => f.suffix === workSuffix) || curFy))
   const date = bsToAd(nepaliDate)
   const [voucherNo, setVoucherNo] = useState('')
   const [reference, setReference] = useState('')
@@ -193,7 +232,6 @@ export default function VoucherForm() {
   const [lines, setLines] = useState([newLine()])
   const [forceAdvanced, setForceAdvanced] = useState(false)
   const [err, setErr] = useState('')
-  const [ok, setOk] = useState('')
   const [busy, setBusy] = useState(false)
 
   const type = types.find((t) => sameId(t.id, typeId))
@@ -247,6 +285,29 @@ export default function VoucherForm() {
 
   // voucher no. = PREFIX-001/81-82, numbered separately per type and fiscal year
   const fy = fyOf(nepaliDate)
+  // editing: year follows the voucher's own date; new: the chosen working year
+  const workFy = id ? fy : (years.find((f) => f.suffix === workSuffix) || curFy)
+  const oldYear = !!workFy && workFy.suffix !== curFy.suffix
+
+  function chooseFy(suffix) {
+    const f = years.find((x) => x.suffix === suffix)
+    if (!f) return
+    setWorkSuffix(suffix)
+    store.set('work-fy', suffix)
+    setNepaliDate(startDateFor(f))
+    setAskFy(false)
+    setErr('')
+  }
+
+  // success popup: fades after 3 s, Esc or click closes it
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), 3000)
+    const k = (e) => { if (e.key === 'Escape') setToast(null) }
+    document.addEventListener('keydown', k)
+    return () => { clearTimeout(t); document.removeEventListener('keydown', k) }
+  }, [toast])
+
   const [numTick, setNumTick] = useState(0)
   useEffect(() => {
     if (id || !typeId || !fy || !types.length) return
@@ -362,8 +423,10 @@ export default function VoucherForm() {
 
   async function save(e) {
     e.preventDefault()
-    setErr(''); setOk('')
+    setErr('')
     if (!date) return setErr('Enter a valid Nepali date (YYYY-MM-DD).')
+    if (workFy && (nepaliDate < workFy.from || nepaliDate > workFy.to))
+      return setErr(`Date must be inside financial year ${workFy.label}.`)
     let entries
     try { entries = buildEntries() } catch (x) { return setErr(x.message) }
 
@@ -372,7 +435,11 @@ export default function VoucherForm() {
       const newId = await api.saveVoucher({
         id, typeId, date, entries, narration, reference, nepaliDate, voucherNo,
       })
-      setOk(`Saved ${voucherNo}.`)
+      setToast({
+        no: voucherNo, bs: nepaliDate, amount: totals.dr,
+        type: type?.name || '', edited: !!id, key: Date.now(),
+      })
+      if (workFy) store.set('last-date:' + workFy.suffix, nepaliDate)
       if (!id) {
         // keep Cash/Bank choice and main account for the next entry
         setHead((h) => ({ ...h, line_narration: '' }))
@@ -434,11 +501,35 @@ export default function VoucherForm() {
         )}
       </div>
 
+      {oldYear && (
+        <div style={banner}>
+          <strong>Old year entry · FY {workFy.label}</strong>
+          <span> — dates are limited to {longBs(workFy.from)} – {longBs(workFy.to)}.</span>
+          {!id && (
+            <button type="button" className="link" style={{ marginLeft: 8 }} onClick={() => chooseFy(curFy.suffix)}>
+              Switch to current year {curFy.label}
+            </button>
+          )}
+        </div>
+      )}
+
       {err && <div className="err">{err}</div>}
-      {ok && <div className="ok">{ok}</div>}
 
       <div className="card">
         <div className="toolbar">
+          <div className="field">
+            <label>Financial year</label>
+            <select value={workFy?.suffix || ''} disabled={!!id}
+                    title={id ? 'Fixed by this voucher\'s date' : ''}
+                    onChange={(e) => chooseFy(e.target.value)}
+                    style={oldYear ? { borderColor: '#d97706', background: '#fffbeb', fontWeight: 600 } : null}>
+              {(id && fy && !years.some((f) => f.suffix === fy.suffix) ? [fy, ...years] : years).map((f) => (
+                <option key={f.suffix} value={f.suffix}>
+                  {f.label}{f.suffix === curFy.suffix ? ' (current)' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="field">
             <label>Voucher type</label>
             <select value={typeId} onChange={(e) => changeType(e.target.value)} required>
@@ -451,7 +542,8 @@ export default function VoucherForm() {
           </div>
           <div className="field">
             <label>Date (BS)</label>
-            <NepaliDateInput value={nepaliDate} onChange={(bs) => setNepaliDate(bs)} required />
+            <NepaliDateInput value={nepaliDate} onChange={(bs) => setNepaliDate(bs)} required
+                             min={id ? undefined : workFy?.from} max={id ? undefined : workFy?.to} />
           </div>
           <div className="field" style={{ flex: 1, minWidth: 160 }}>
             <label>Reference</label>
@@ -572,6 +664,79 @@ export default function VoucherForm() {
         <button className="primary" disabled={busy}>{busy ? 'Saving…' : 'Save voucher'}</button>
         {id && <button type="button" className="danger" onClick={remove}>Delete</button>}
       </div>
+
+      {askFy && (
+        <div style={overlay}>
+          <div role="dialog" aria-modal="true" style={dialog}>
+            <h2 style={{ marginTop: 0 }}>Which financial year?</h2>
+            <p className="muted" style={{ marginTop: 0 }}>
+              Last time this browser was entering <strong>FY {workFy.label}</strong> (old year).
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {years.map((f) => (
+                <button key={f.suffix} type="button"
+                        className={f.suffix === workSuffix ? 'primary' : 'ghost'}
+                        onClick={() => chooseFy(f.suffix)}>
+                  {f.suffix === workSuffix ? 'Continue ' : ''}FY {f.label}
+                  {f.suffix === curFy.suffix ? ' (current year)' : ''}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toast && (
+        <div key={toast.key} style={toastWrap} onClick={() => setToast(null)} role="status">
+          <div style={toastBox}>
+            <div style={{ fontSize: 26, lineHeight: 1 }}>✓</div>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 16 }}>
+                {toast.edited ? 'Voucher updated' : 'Voucher saved successfully'}
+              </div>
+              <div style={{ marginTop: 2 }}>
+                <strong>{toast.no}</strong> · {toast.type} · {longBs(toast.bs)} · {money(toast.amount)}
+              </div>
+              <div style={{ fontSize: 11, opacity: .8, marginTop: 4 }}>click or press Esc to close</div>
+            </div>
+          </div>
+        </div>
+      )}
     </form>
   )
+}
+
+/* ---------- popup / banner styles ---------- */
+const banner = {
+  background: '#fffbeb', border: '1px solid #f59e0b', color: '#92400e',
+  borderRadius: 10, padding: '10px 14px', margin: '0 0 12px',
+}
+const overlay = {
+  position: 'fixed', inset: 0, background: 'rgba(16,24,20,.45)', zIndex: 100,
+  display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+}
+const dialog = {
+  background: '#fff', borderRadius: 14, padding: 22, width: 'min(380px, 100%)',
+  boxShadow: '0 20px 50px rgba(0,0,0,.25)',
+}
+const toastWrap = {
+  position: 'fixed', top: 24, left: 0, right: 0, zIndex: 110,
+  display: 'flex', justifyContent: 'center', padding: '0 16px', cursor: 'pointer',
+  animation: 'vfToast 3s ease forwards',
+}
+const toastBox = {
+  display: 'flex', gap: 14, alignItems: 'center', maxWidth: 520,
+  background: 'var(--primary, #17532f)', color: '#fff', borderRadius: 14,
+  padding: '14px 20px', boxShadow: '0 14px 40px rgba(0,0,0,.25)',
+}
+
+// fade-in / fade-out for the success popup
+if (typeof document !== 'undefined' && !document.getElementById('vf-toast-css')) {
+  const st = document.createElement('style')
+  st.id = 'vf-toast-css'
+  st.textContent = `@keyframes vfToast {
+    0% { opacity: 0; transform: translateY(-12px) }
+    10%, 80% { opacity: 1; transform: none }
+    100% { opacity: 0; transform: translateY(-6px) } }`
+  document.head.appendChild(st)
 }

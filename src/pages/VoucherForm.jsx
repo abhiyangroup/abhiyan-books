@@ -441,9 +441,10 @@ export default function VoucherForm() {
       })
       if (workFy) store.set('last-date:' + workFy.suffix, nepaliDate)
       if (!id) {
-        // keep Cash/Bank choice and main account for the next entry
-        setHead((h) => ({ ...h, line_narration: '' }))
-        setLines(freshLines(simple ? rule : null))
+        // blank form for the next entry — same voucher type, same Cash/Bank/Credit mode
+        setForceAdvanced(false)
+        setHead({ ...blankHead(), ledger_id: rule ? pickHead(ledgers, mode, '') : '' })
+        setLines(freshLines(rule))
         setNarration(''); setReference('')
         setNumTick((n) => n + 1)
       } else {
@@ -689,16 +690,18 @@ export default function VoucherForm() {
       {toast && (
         <div key={toast.key} style={toastWrap} onClick={() => setToast(null)} role="status">
           <div style={toastBox}>
-            <div style={{ fontSize: 26, lineHeight: 1 }}>✓</div>
-            <div>
-              <div style={{ fontWeight: 700, fontSize: 16 }}>
-                {toast.edited ? 'Voucher updated' : 'Voucher saved successfully'}
-              </div>
-              <div style={{ marginTop: 2 }}>
-                <strong>{toast.no}</strong> · {toast.type} · {longBs(toast.bs)} · {money(toast.amount)}
-              </div>
-              <div style={{ fontSize: 11, opacity: .8, marginTop: 4 }}>click or press Esc to close</div>
+            <div style={{
+              width: 56, height: 56, borderRadius: '50%', background: 'rgba(255,255,255,.18)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 30, fontWeight: 700,
+            }}>✓</div>
+            <div style={{ fontWeight: 700, fontSize: 21 }}>
+              {toast.edited ? 'Voucher updated' : 'Voucher saved successfully'}
             </div>
+            <div style={{ fontSize: 24, fontWeight: 700, letterSpacing: '.02em' }}>{toast.no}</div>
+            <div style={{ fontSize: 15, opacity: .92 }}>
+              {toast.type} · {longBs(toast.bs)} · {money(toast.amount)}
+            </div>
+            <div style={{ fontSize: 12, opacity: .7 }}>click or press Esc to close</div>
           </div>
         </div>
       )}
@@ -720,14 +723,15 @@ const dialog = {
   boxShadow: '0 20px 50px rgba(0,0,0,.25)',
 }
 const toastWrap = {
-  position: 'fixed', top: 24, left: 0, right: 0, zIndex: 110,
-  display: 'flex', justifyContent: 'center', padding: '0 16px', cursor: 'pointer',
+  position: 'fixed', inset: 0, zIndex: 110, padding: 16, cursor: 'pointer',
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  background: 'rgba(15,23,42,.25)',
   animation: 'vfToast 3s ease forwards',
 }
 const toastBox = {
-  display: 'flex', gap: 14, alignItems: 'center', maxWidth: 520,
-  background: 'var(--primary, #17532f)', color: '#fff', borderRadius: 14,
-  padding: '14px 20px', boxShadow: '0 14px 40px rgba(0,0,0,.25)',
+  display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: 10,
+  width: 'min(440px, 100%)', background: '#1d4ed8', color: '#fff', borderRadius: 18,
+  padding: '28px 30px', boxShadow: '0 24px 60px rgba(29,78,216,.35)',
 }
 
 // fade-in / fade-out for the success popup
@@ -735,8 +739,8 @@ if (typeof document !== 'undefined' && !document.getElementById('vf-toast-css'))
   const st = document.createElement('style')
   st.id = 'vf-toast-css'
   st.textContent = `@keyframes vfToast {
-    0% { opacity: 0; transform: translateY(-12px) }
+    0% { opacity: 0; transform: scale(.92) }
     10%, 80% { opacity: 1; transform: none }
-    100% { opacity: 0; transform: translateY(-6px) } }`
+    100% { opacity: 0; transform: scale(.97) } }`
   document.head.appendChild(st)
 }

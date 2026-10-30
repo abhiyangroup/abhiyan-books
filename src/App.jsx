@@ -12,7 +12,9 @@ import LedgerStatement from './pages/LedgerStatement'
 import TrialBalance from './pages/TrialBalance'
 import ProfitLoss from './pages/ProfitLoss'
 import BalanceSheet from './pages/BalanceSheet'
+import CashFlow from './pages/CashFlow'
 
+// [path, label, adminOnly]
 const NAV = [
   ['/', 'Dashboard'],
   ['/voucher', 'New Voucher'],
@@ -21,8 +23,9 @@ const NAV = [
   ['/trial-balance', 'Trial Balance'],
   ['/profit-loss', 'Profit & Loss'],
   ['/balance-sheet', 'Balance Sheet'],
-  ['/ledgers', 'Ledgers'],
-  ['/groups', 'Groups'],
+  ['/cash-flow', 'Cash Flow'],
+  ['/ledgers', 'Ledgers', true],
+  ['/groups', 'Groups', true],
 ]
 
 export default function App() {
@@ -44,6 +47,10 @@ export default function App() {
   if (session === undefined) return <div className="center">Loading…</div>
   if (!session) return <Login />
 
+  // only the admin profile sees Ledgers and Groups
+  const isAdmin = String(profile?.role || '').toLowerCase() === 'admin'
+  const adminOnly = (page) => (isAdmin ? page : profile ? <Navigate to="/" replace /> : <div className="center">Loading…</div>)
+
   return (
     <HashRouter>
       <div className="app">
@@ -63,7 +70,7 @@ export default function App() {
 
         <div className="body">
           <nav className={menuOpen ? 'sidebar open' : 'sidebar'}>
-            {NAV.map(([to, label]) => (
+            {NAV.filter(([, , admin]) => !admin || isAdmin).map(([to, label]) => (
               <NavLink
                 key={to}
                 to={to}
@@ -86,8 +93,9 @@ export default function App() {
               <Route path="/trial-balance" element={<TrialBalance />} />
               <Route path="/profit-loss" element={<ProfitLoss />} />
               <Route path="/balance-sheet" element={<BalanceSheet />} />
-              <Route path="/ledgers" element={<Ledgers />} />
-              <Route path="/groups" element={<Groups />} />
+              <Route path="/cash-flow" element={<CashFlow />} />
+              <Route path="/ledgers" element={adminOnly(<Ledgers />)} />
+              <Route path="/groups" element={adminOnly(<Groups />)} />
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>
           </main>

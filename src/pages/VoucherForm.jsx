@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { api, money } from '../lib/api'
 import NepaliDateInput, { adToBs, bsToAd, todayBs, daysInBsMonth, longBs } from '../components/NepaliDateInput'
 
@@ -206,6 +206,7 @@ function inferMode(rule, ledgers, head, ls) {
 export default function VoucherForm() {
   const { id } = useParams()
   const nav = useNavigate()
+  const location = useLocation()
 
   const [types, setTypes] = useState([])
   const [ledgers, setLedgers] = useState([])
@@ -251,12 +252,24 @@ export default function VoucherForm() {
 
         if (!v) {
           if (!t.length) return
-          const r = ruleFor(t[0])
-          setTypeId(t[0].id)
+          // blank voucher; after an edit we come back here on the same type and mode
+          const st = location.state || {}
+          const t0 = t.find((x) => sameId(x.id, st.typeId)) || t[0]
+          const r = ruleFor(t0)
+          setTypeId(t0.id)
           setLines(freshLines(r))
+          setForceAdvanced(false)
+          setNarration(''); setReference('')
           if (r) {
-            setModeKey(r.modes[0].key)
-            setHead({ ...blankHead(), ledger_id: pickHead(l, r.modes[0], '') })
+            const m0 = r.modes.find((m) => m.key === st.modeKey) || r.modes[0]
+            setModeKey(m0.key)
+            setHead({ ...blankHead(), ledger_id: pickHead(l, m0, '') })
+          } else {
+            setHead(blankHead())
+          }
+          if (st.typeId) {
+            const wf = fyList().find((f) => f.suffix === store.get('work-fy')) || fyOf(todayBs())
+            setNepaliDate(startDateFor(wf))
           }
           return
         }
@@ -307,6 +320,11 @@ export default function VoucherForm() {
     document.addEventListener('keydown', k)
     return () => { clearTimeout(t); document.removeEventListener('keydown', k) }
   }, [toast])
+
+  // popup handed over after saving an edit
+  useEffect(() => {
+    if (location.state?.toast) setToast(location.state.toast)
+  }, [location.key])
 
   const [numTick, setNumTick] = useState(0)
   useEffect(() => {
@@ -435,10 +453,11 @@ export default function VoucherForm() {
       const newId = await api.saveVoucher({
         id, typeId, date, entries, narration, reference, nepaliDate, voucherNo,
       })
-      setToast({
+      const done = {
         no: voucherNo, bs: nepaliDate, amount: totals.dr,
         type: type?.name || '', edited: !!id, key: Date.now(),
-      })
+      }
+      if (!id) setToast(done)
       if (workFy) store.set('last-date:' + workFy.suffix, nepaliDate)
       if (!id) {
         // blank form for the next entry — same voucher type, same Cash/Bank/Credit mode
@@ -448,7 +467,8 @@ export default function VoucherForm() {
         setNarration(''); setReference('')
         setNumTick((n) => n + 1)
       } else {
-        nav(`/voucher/${newId}`)
+        // edited: show the popup and open a blank voucher of the same type
+        nav('/voucher', { replace: true, state: { toast: done, typeId, modeKey } })
       }
     } catch (e2) {
       setErr(e2.message)
@@ -539,7 +559,7 @@ export default function VoucherForm() {
           </div>
           <div className="field">
             <label>Voucher no.</label>
-            <input value={voucherNo} onChange={(e) => setVoucherNo(e.target.value)} style={{ width: 120 }} />
+            <input value={voucherNo} onChange={(e) => setVoucherNo(e.target.value)} style={{ width: 180 }} />
           </div>
           <div className="field">
             <label>Date (BS)</label>

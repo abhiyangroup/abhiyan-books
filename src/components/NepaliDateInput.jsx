@@ -230,7 +230,9 @@ const GREEN = 'var(--primary, #17532f)'
   - AD is shown faded inside the box, read-only, and follows the BS date.
   value: 'YYYY-MM-DD' (BS)    onChange(bs, ad)
 */
-export default function NepaliDateInput({ value, onChange, required, width = 270, id }) {
+export default function NepaliDateInput({ value, onChange, required, width = 270, id, min, max }) {
+  // optional range (BS strings, e.g. a fiscal year); 'YYYY-MM-DD' compares correctly as text
+  const inRange = (bs) => (!min || bs >= min) && (!max || bs <= max)
   const [text, setText] = useState(value || '')
   const [open, setOpen] = useState(false)
   const [bad, setBad] = useState(false)
@@ -256,21 +258,25 @@ export default function NepaliDateInput({ value, onChange, required, width = 270
   function typed(v) {
     setText(v)
     const p = parseBs(v)
-    if (p) commit(fmtBs(p.y, p.m, p.d))
+    if (p && inRange(fmtBs(p.y, p.m, p.d))) commit(fmtBs(p.y, p.m, p.d))
   }
 
   // an invalid entry never sticks: put back the last valid date, so the box
   // always shows exactly the date that will be used
   function blur() {
-    if (parseBs(text)) return
+    const p = parseBs(text)
+    if (p && inRange(fmtBs(p.y, p.m, p.d))) return
     setText(value || '')
     setBad(!value && !!required)
   }
 
   // AD follows what is typed right now (not the last valid value)
-  const typedOk = parseBs(text)
+  const p0 = parseBs(text)
+  const outside = !!p0 && !inRange(fmtBs(p0.y, p0.m, p0.d))
+  const typedOk = p0 && !outside
   const ad = typedOk ? bsToAd(text) : ''
-  const adLabel = ad ? `AD ${ad}` : text.length >= 8 ? 'invalid date' : ''
+  const adLabel = outside ? 'outside selected year' : ad ? `AD ${ad}` : text.length >= 8 ? 'invalid date' : ''
+  const isErr = outside || adLabel === 'invalid date'
 
   return (
     <div ref={box} style={{ position: 'relative', width }}>
@@ -289,7 +295,7 @@ export default function NepaliDateInput({ value, onChange, required, width = 270
         style={{
           width: '100%', paddingRight: 150, boxSizing: 'border-box',
           fontVariantNumeric: 'tabular-nums',
-          ...(bad || adLabel === 'invalid date' ? { borderColor: 'var(--cr, #b42318)' } : null),
+          ...(bad || isErr ? { borderColor: 'var(--cr, #b42318)' } : null),
         }}
       />
 
@@ -300,7 +306,7 @@ export default function NepaliDateInput({ value, onChange, required, width = 270
           position: 'absolute', right: 38, top: '50%', transform: 'translateY(-50%)',
           fontSize: 13, pointerEvents: 'none', whiteSpace: 'nowrap',
           fontVariantNumeric: 'tabular-nums',
-          color: adLabel === 'invalid date' ? 'var(--cr, #b42318)' : '#9aa3a0',
+          color: isErr ? 'var(--cr, #b42318)' : '#9aa3a0',
         }}
       >
         {adLabel}
@@ -321,8 +327,11 @@ export default function NepaliDateInput({ value, onChange, required, width = 270
 
       {open && (
         <Calendar
-          value={parseBs(value) ? value : todayBs()}
+          value={parseBs(value) && inRange(value) ? value : inRange(todayBs()) ? todayBs() : (min || max || todayBs())}
           selected={value}
+          inRange={inRange}
+          min={min}
+          max={max}
           onPick={(bs) => { commit(bs); setOpen(false) }}
         />
       )}
@@ -331,7 +340,7 @@ export default function NepaliDateInput({ value, onChange, required, width = 270
 }
 
 /* ---------- popover calendar ---------- */
-function Calendar({ value, selected, onPick }) {
+function Calendar({ value, selected, onPick, inRange = () => true, min, max }) {
   const start = parseBs(value)
   const [y, setY] = useState(start.y)
   const [m, setM] = useState(start.m)
@@ -342,6 +351,8 @@ function Calendar({ value, selected, onPick }) {
     if (nm < 1) { nm = 12; ny-- }
     if (nm > 12) { nm = 1; ny++ }
     if (ny < MIN_BS_YEAR || ny > MAX_BS_YEAR) return
+    const firstDay = fmtBs(ny, nm, 1), lastDay = fmtBs(ny, nm, daysInBsMonth(ny, nm))
+    if ((max && firstDay > max) || (min && lastDay < min)) return   // stay inside the allowed range
     setY(ny); setM(nm)
   }
 
@@ -349,7 +360,8 @@ function Calendar({ value, selected, onPick }) {
   const len = daysInBsMonth(y, m)
   const cells = [...Array(first).fill(null), ...Array.from({ length: len }, (_, i) => i + 1)]
   const years = []
-  for (let i = MIN_BS_YEAR; i <= MAX_BS_YEAR; i++) years.push(i)
+  const yLo = min ? parseBs(min).y : MIN_BS_YEAR, yHi = max ? parseBs(max).y : MAX_BS_YEAR
+  for (let i = yLo; i <= yHi; i++) years.push(i)
 
   const adFirst = bsToAd(fmtBs(y, m, 1)), adLast = bsToAd(fmtBs(y, m, len))
   const provisional = isProvisionalBs(fmtBs(y, m, 1))
@@ -377,15 +389,17 @@ function Calendar({ value, selected, onPick }) {
           if (!d) return <div key={'e' + i} />
           const bs = fmtBs(y, m, d)
           const isSel = bs === selected, isToday = bs === today, isSat = i % 7 === 6
+          const off = !inRange(bs)
           return (
             <button
-              type="button" key={bs} onClick={() => onPick(bs)}
+              type="button" key={bs} onClick={() => onPick(bs)} disabled={off}
               title={longAd(bsToAd(bs))}
               style={{
                 ...cal.day,
                 ...(isSat ? { color: 'var(--cr, #b42318)' } : null),
                 ...(isToday ? cal.today : null),
                 ...(isSel ? cal.sel1 : null),
+                ...(off ? { opacity: .25, cursor: 'not-allowed' } : null),
               }}
             >
               <span>{d}</span>
@@ -396,7 +410,9 @@ function Calendar({ value, selected, onPick }) {
       </div>
 
       <div style={cal.foot}>
-        <button type="button" style={cal.link} onClick={() => onPick(today)}>Today · {longBs(today)}</button>
+        {inRange(today)
+          ? <button type="button" style={cal.link} onClick={() => onPick(today)}>Today · {longBs(today)}</button>
+          : <span style={{ fontSize: 12, color: '#6b7280' }}>{longBs(min)} – {longBs(max)}</span>}
         {provisional && <span style={{ fontSize: 11, color: '#b54708' }}>provisional calendar</span>}
       </div>
     </div>

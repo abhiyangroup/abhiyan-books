@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api, money } from '../lib/api'
-import NepaliDateInput, { adToBs, bsToAd, todayBs } from '../components/NepaliDateInput'
+import NepaliDateInput, { adToBs, bsToAd, todayBs, daysInBsMonth } from '../components/NepaliDateInput'
 
 /* ---------- account classification (from Tally groups) ---------- */
 const grp = (l) => `${l?.group_name || ''} ${l?.primary_group || ''}`
@@ -89,6 +89,54 @@ const seg = {
   on: {
     background: GREEN, color: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,.18)',
   },
+}
+
+/* ---------- voucher numbering: PREFIX-001/81-82 ---------- */
+// used only when a type has no numbered vouchers yet
+const DEFAULT_PREFIX = {
+  payment: 'PMT', receipt: 'RCT', contra: 'CNT', journal: 'JRN',
+  sales: 'SAL', purchase: 'PUR', 'credit note': 'CRN', 'debit note': 'DBN',
+}
+
+// Nepali fiscal year (1 Shrawan – end of Asar) for a BS date
+function fyOf(bs) {
+  const m = /^(\d{4})-(\d{2})-\d{2}$/.exec(bs || '')
+  if (!m) return null
+  const start = +m[2] >= 4 ? +m[1] : +m[1] - 1
+  return {
+    from: `${start}-04-01`,
+    to: `${start + 1}-03-${daysInBsMonth(start + 1, 3)}`,
+    suffix: `${String(start).slice(2)}-${String(start + 1).slice(2)}`,   // 81-82
+  }
+}
+
+const NUM_RE = /^(.*?)[-\s]?(\d+)(?:\/(\d{2}-\d{2}))?$/   // PMT-001/81-82 | PUR-0001
+
+async function nextFyNumber(type, fy) {
+  // everything entered in that fiscal year (including cancelled vouchers)
+  const rows = await api.daybook(bsToAd(fy.from), bsToAd(fy.to))
+  const all = rows.filter((r) => r.voucher_type === type.name)
+
+  let max = 0, prefix = ''
+  for (const r of all) {
+    const x = NUM_RE.exec(String(r.voucher_no || '').trim())
+    if (!x) continue
+    if (!prefix) prefix = x[1]
+    if (!x[3] || x[3] === fy.suffix) max = Math.max(max, +x[2])
+  }
+
+  if (!prefix) {
+    // no voucher of this type that year: reuse the prefix from any other year
+    try {
+      const any = await api.daybook('1943-04-14', '2100-12-31')
+      const hit = any.filter((r) => r.voucher_type === type.name)
+        .map((r) => NUM_RE.exec(String(r.voucher_no || '').trim())).find(Boolean)
+      prefix = hit?.[1] || ''
+    } catch { /* ignore */ }
+  }
+  if (!prefix) prefix = DEFAULT_PREFIX[type.name.toLowerCase()] || type.name.slice(0, 3).toUpperCase()
+
+  return `${prefix}-${String(max + 1).padStart(3, '0')}/${fy.suffix}`
 }
 
 /* ---------- helpers ---------- */
@@ -197,10 +245,17 @@ export default function VoucherForm() {
       .catch((e) => setErr(e.message))
   }, [id])
 
+  // voucher no. = PREFIX-001/81-82, numbered separately per type and fiscal year
+  const fy = fyOf(nepaliDate)
+  const [numTick, setNumTick] = useState(0)
   useEffect(() => {
-    if (id || !typeId) return
-    api.nextVoucherNo(typeId).then(setVoucherNo).catch(() => {})
-  }, [typeId, id])
+    if (id || !typeId || !fy || !types.length) return
+    const t = types.find((x) => sameId(x.id, typeId))
+    if (!t) return
+    let alive = true
+    nextFyNumber(t, fy).then((n) => { if (alive && n) setVoucherNo(n) }).catch(() => {})
+    return () => { alive = false }
+  }, [typeId, id, fy?.suffix, types, numTick])
 
   const totals = useMemo(() => {
     if (simple) {
@@ -323,7 +378,7 @@ export default function VoucherForm() {
         setHead((h) => ({ ...h, line_narration: '' }))
         setLines(freshLines(simple ? rule : null))
         setNarration(''); setReference('')
-        api.nextVoucherNo(typeId).then(setVoucherNo).catch(() => {})
+        setNumTick((n) => n + 1)
       } else {
         nav(`/voucher/${newId}`)
       }
